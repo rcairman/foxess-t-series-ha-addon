@@ -22,4 +22,4 @@ This project is not maintained, I made it for my own use. You are welcome to use
 4. Start the add-on.
 
 ## Credits
-FoxESS protocol mapping has been borrowed from https://github.com/rcairman/foxess-t-series-ha-addon
+FoxESS protocol mapping has been borrowed from https://github.com/assembly12/Foxess-T-series-ESPHome-Home-Assistant
