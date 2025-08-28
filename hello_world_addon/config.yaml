@@ -1,9 +1,0 @@
-name: "Hello World Addon"
-slug: "hello_world"
-version: "1.0.3"
-description: "Minimal test addon for Home Assistant"
-arch:
-  - amd64
-startup: services
-boot: auto
-init: false
