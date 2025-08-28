@@ -5,5 +5,5 @@ FROM ${BUILD_FROM}
 RUN apk add --no-cache python3 py3-paho-mqtt
 
 # Copy files
-COPY foxess_t_series_integration.py /foxess_t_series_integration.py
+COPY foxess_t_series_integration.py /usr/local/bin/foxess_t_series_integration.py
 COPY rootfs /

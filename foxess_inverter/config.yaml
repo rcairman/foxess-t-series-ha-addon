@@ -1,13 +1,13 @@
 name: "FoxESS PV Inverter"
-version: "1.0.0"
-slug: "foxess_inverter"
+version: "1.0.1"
+slug: "foxess_t_series_integration"
 description: "FoxESS T-Series PV inverter MQTT integration with Home Assistant"
 arch:
   - amd64
   - armhf
   - armv7
   - aarch64
-startup: application
+startup: services
 boot: auto
 options:
   inverter_ip: "192.168.1.31"
