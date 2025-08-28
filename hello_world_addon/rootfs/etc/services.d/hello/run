@@ -1,0 +1,2 @@
+#!/usr/bin/with-contenv bash
+exec echo "Hello from addon"
