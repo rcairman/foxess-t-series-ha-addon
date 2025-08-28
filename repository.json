@@ -1,0 +1,5 @@
+{
+  "name": "FoxESS T-Series PV inverter MQTT integration with Home Assistant",
+  "url": "https://github.com/rcairman/foxess-t-series-ha-addon",
+  "maintainer": "Kuba <rcmodelarz@gmail.com>"
+}
