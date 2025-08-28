@@ -1,5 +1,5 @@
 name: "FoxESS PV Inverter"
-version: "1.0.4"
+version: "1.0.5"
 slug: "foxess_t_series_integration"
 description: "FoxESS T-Series PV inverter MQTT integration with Home Assistant"
 arch:
@@ -23,3 +23,4 @@ schema:
   mqtt_port: int
   mqtt_username: str
   mqtt_password: str
+init: false
