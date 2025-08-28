@@ -6,3 +6,4 @@ arch:
   - amd64
 startup: services
 boot: auto
+init: true
