@@ -6,13 +6,15 @@ import struct
 import time
 import json
 import threading
+import builtins
 from typing import Tuple, List
 
 # -----------------------------
-# Konfiguracja
+# Config
 # -----------------------------
 
 CONFIG_PATH = "/data/options.json"
+#CONFIG_PATH = "options.json" # local testing only
 
 with open(CONFIG_PATH, "r") as f:
     config = json.load(f)
@@ -20,21 +22,20 @@ with open(CONFIG_PATH, "r") as f:
 INVERTER_IP = config.get("inverter_ip", "192.168.1.31")
 INVERTER_PORT = config.get("inverter_port", 502)
 
-MQTT_HOST = config.get("mqtt_host", "core-mosquitto")  # w HA lepiej użyć core-mosquitto
+MQTT_HOST = config.get("mqtt_host", "core-mosquitto")
 MQTT_PORT = config.get("mqtt_port", 1883)
-MQTT_USERNAME = config.get("mqtt_username", "foxess")
-MQTT_PASSWORD = config.get("mqtt_password", "foxess_ha_integration")
+MQTT_USERNAME = config.get("mqtt_username", "username")
+MQTT_PASSWORD = config.get("mqtt_password", "password")
 
-# Prefix dla wszystkich stanów
+# Disable all prints
+builtins.print = lambda *a, **k: None
+
 STATE_PREFIX = "FoxESS"
-
-# Discovery włączone/wyłączone
 ENABLE_DISCOVERY = True
 
-# Co ile próbować ponownie po rozłączeniu (sekundy)
 RECONNECT_DELAY = 30
 
-# Socket timeout (sekundy)
+# Socket timeout
 SOCKET_TIMEOUT = 120
 
 # -----------------------------
@@ -48,10 +49,9 @@ except ImportError:
 
 mqtt_client = None
 availability_topic = f"{STATE_PREFIX}/availability"
-device_serial = None  # uzupełnimy po ramce 0x06
-device_model = None # uzupełnimy po ramce 0x01
+device_serial = None  # fill in once frame 0x06 is received
+device_model = None # fill in once frame 0x01 is received
 
-# Mapowanie: klucz stanu -> (friendly_name, unit, device_class, state_class)
 SENSOR_META = {
     "grid_power": ("Grid Power", "W", "power", "measurement"),
     "generation_power": ("Generation Power", "W", "power", "measurement"),
@@ -93,7 +93,7 @@ SENSOR_META = {
     "output_energy_alltime": ("All-time Yield", "kWh", "energy", "total_increasing"),
 }
 
-# INFO fields (opcjonalne publikowanie)
+# INFO fields
 INFO_TOPICS = [
     "Version Master",
     "Version Slave",
@@ -110,7 +110,6 @@ INFO_TOPICS = [
     "Unknown4",
 ]
 
-
 def mqtt_publish(topic: str, payload, retain=False, qos=0):
     """Bezpieczne publikowanie (string/float/int/list->json)."""
     if mqtt_client is None:
@@ -122,10 +121,8 @@ def mqtt_publish(topic: str, payload, retain=False, qos=0):
     full_topic = topic
     try:
         mqtt_client.publish(full_topic, payload, qos=qos, retain=retain)
-        # print(f"MQTT -> {full_topic}: {payload}")  # debug
     except Exception as e:
         print("MQTT publish error:", e)
-
 
 def build_device_descriptor():
     identifiers = ["foxess_pvinverter"]
@@ -140,7 +137,6 @@ def build_device_descriptor():
 
 
 def publish_discovery():
-    """Publikacja configów MQTT Discovery dla HA."""
     if not ENABLE_DISCOVERY or mqtt_client is None:
         return
 
@@ -169,14 +165,14 @@ def publish_discovery():
         if state_class:
             payload["state_class"] = state_class
 
-        # specyficzne ustawienia dla output_energy_today
+        # specific attrubutes for output_energy_today
         if key == "output_energy_today":
             payload["suggested_display_precision"] = 1
             payload["icon"] = "mdi:solar-power"
 
         mqtt_publish(config_topic, payload, retain=True)
 
-    # Faults jako osobne binary_sensor 1..8
+    # Faults sent as binary_sensor 1..8
     for i in range(8):
         key = f"fault_{i+1}"
         friendly = f"Fault Word {i+1}"
@@ -195,7 +191,7 @@ def publish_discovery():
         }
         mqtt_publish(config_topic, payload, retain=True)
 
-    # Info jako text sensors
+    # Info as text sensors
     for name in INFO_TOPICS:
         key = f"info_{name}"
         unique_id = f"foxess_{device_serial or 'unknown'}_{key}"
@@ -220,21 +216,21 @@ def mqtt_connect():
 
     def on_connect(client, userdata, flags, rc):
         if rc == 0:
-            print("MQTT połączony")
+            print("MQTT connected")
             mqtt_publish(availability_topic, "online", retain=True)
         else:
-            print("MQTT błąd połączenia, rc:", rc)
+            print("MQTT connection error, rc:", rc)
 
     mqtt_client.on_connect = on_connect
     mqtt_client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
 
-    # uruchom loop w wątku
+    # run loop in a thread
     thread = threading.Thread(target=mqtt_client.loop_forever, daemon=True)
     thread.start()
 
 
 # -----------------------------
-# Parser ramek / dekodowanie
+# Parser
 # -----------------------------
 
 def parse_two_bytes(b1, b2) -> int:
@@ -250,22 +246,16 @@ def parse_four_bytes(b1, b2, b3, b4) -> int:
 
 
 def extract_frames_from_buffer(buffer: bytes) -> Tuple[List[bytes], bytes]:
-    """
-    Zwraca (lista_ramek, reszta_bufora).
-    Format: 0x7E 0x7E ... [len_hi len_lo] ... 0xE7 0xE7
-    user_len = big-endian z pozycji [7],[8]
-    total_len = user_len + 13
-    """
     frames = []
     while True:
         start = buffer.find(b"\x7E\x7E")
         if start == -1:
-            # Zachowaj 1 bajt jeśli kończy się na 0x7E (możliwy początek nagłówka)
+            # Save 1 byte if it ends with 0x7E (possibly new header)
             tail = buffer[-1:] if buffer.endswith(b"\x7E") else b""
             return frames, tail
 
         if start > 0:
-            print("Nagłówek nie pasuje, przesuwam bufor")
+            print("Header does not match, shifting buffer")
             buffer = buffer[start:]
 
         if len(buffer) < 9:
@@ -275,7 +265,7 @@ def extract_frames_from_buffer(buffer: bytes) -> Tuple[List[bytes], bytes]:
         total_len = user_len + 13
 
         if total_len < 15 or total_len > 4096:
-            print(f"Podejrzana długość ({total_len}), odrzucam 2 bajty i resync")
+            print(f"Questionable length of ({total_len}), dropping 2 bytes")
             buffer = buffer[2:]
             continue
 
@@ -284,7 +274,7 @@ def extract_frames_from_buffer(buffer: bytes) -> Tuple[List[bytes], bytes]:
 
         candidate = buffer[:total_len]
         if candidate[-2:] != b"\xE7\xE7":
-            print("Stopka nie pasuje, odrzucam 1 bajt i resync")
+            print("Footer does not match, dropping 1 byte")
             buffer = buffer[1:]
             continue
 
@@ -293,7 +283,7 @@ def extract_frames_from_buffer(buffer: bytes) -> Tuple[List[bytes], bytes]:
 
 
 def decode_info(frame: bytes):
-    """Ramka 0x01 – INFO (wersje, model, itp.)"""
+    """Frame 0x01 – INFO (versions, model, etc)"""
     global device_model
     payload = frame[9:-2]
     parts = payload.split(b"\x00")
@@ -307,20 +297,20 @@ def decode_info(frame: bytes):
 
     labels = INFO_TOPICS
 
-    print("Ramka INFO (0x01):")
+    print("Frame INFO (0x01):")
     for i, f in enumerate(fields, 1):
         label = labels[i - 1] if i <= len(labels) else f"Field_{i}"
         print(f"  {label}: {f}")
         mqtt_publish(f"{STATE_PREFIX}/info/{label}", f, retain=False)
 
-        # zapisz Model_full
+        # save full model name
         if label == "Model_full":
             device_model = f
 
 def decode_data(frame: bytes):
-    """Ramka 0x02 – DANE (wg offsetów z ESPHome) + MQTT publikacja."""
+    """Frame 0x02 – DATA"""
     if len(frame) < 160:
-        print("Ramka DANYCH za krótka")
+        print("Data frame too short")
         return
 
     data = {}
@@ -357,7 +347,7 @@ def decode_data(frame: bytes):
         data["pv4_current"] = parse_two_bytes(frame[59], frame[60]) / 10
 #        data["pv4_power"] = parse_two_bytes(frame[61], frame[62]) / 10
 
-        # calculate PV power manually (stream returns 0s)
+        # calculate PV power manually (stream returns zeros in those fields)
         data["pv1_power"] = data["pv1_voltage"] * data["pv1_current"]
         data["pv2_power"] = data["pv2_voltage"] * data["pv2_current"]
         data["pv3_power"] = data["pv3_voltage"] * data["pv3_current"]
@@ -373,23 +363,23 @@ def decode_data(frame: bytes):
         for offset in range(125, 157, 4):
             fault_val = parse_four_bytes(frame[offset], frame[offset + 1], frame[offset + 2], frame[offset + 3])
             faults.append(fault_val)
-        # faults 1..8 jako osobne tematy + całość JSON
+        # faults 1..8 as separate topics
         for i, val in enumerate(faults, start=1):
             mqtt_publish(f"{STATE_PREFIX}/faults/fault_{i}", 1 if val != 0 else 0)
         mqtt_publish(f"{STATE_PREFIX}/faults/json", faults)
 
     except IndexError:
-        print("Błąd dekodowania ramki danych (IndexError)")
+        print("Frame decoding error (IndexError)")
         return
 
-    print("Ramka DANYCH (0x02):")
+    print("Data frame (0x02):")
     for k, v in data.items():
         print(f"  {k}: {v}")
         mqtt_publish(f"{STATE_PREFIX}/{k}", v)
 
 
 def decode_serial(frame: bytes):
-    """Ramka 0x06 – numer seryjny (obciąć 6 prefiksowych znaków i zera po numerze)."""
+    """Frame 0x06 – serial number (drop 6 leading characters and all zeros at the end"""
     global device_serial
     try:
         raw = frame[9:-2].decode("ascii", errors="ignore")
@@ -402,7 +392,7 @@ def decode_serial(frame: bytes):
         else:
             serial = s.strip()
 
-        # usuń wszystkie dziwne znaki, zostaw tylko A-Z, 0-9, - i _
+        # remove all strange characters, leave only A-Z, 0-9, - and _
         serial = re.sub(r'[^A-Za-z0-9_-]', '', serial)
 
     except Exception as e:
@@ -411,8 +401,8 @@ def decode_serial(frame: bytes):
     if serial and not serial.startswith("decode_error"):
         device_serial = serial
 
-    print("Ramka SERIAL (0x06)")
-    print("  Numer seryjny:", serial)
+    print("SERIAL frame (0x06)")
+    print("  Serial number:", serial)
     mqtt_publish(f"{STATE_PREFIX}/serial", serial)
 
     if ENABLE_DISCOVERY and device_serial:
@@ -420,15 +410,14 @@ def decode_serial(frame: bytes):
 
 
 def decode_frame(frame: bytes):
-    # walidacja długości i znaczników
     if len(frame) < 15 or not (frame.startswith(b"\x7E\x7E") and frame.endswith(b"\xE7\xE7")):
-        print("Błędna ramka")
+        print("Bad frame")
         return
 
     user_len = (frame[7] << 8) | frame[8]
     expected_total = user_len + 13
     if expected_total != len(frame):
-        print(f"Niezgodna długość: header={expected_total}, real={len(frame)}")
+        print(f"Length mismatch: header={expected_total}, real={len(frame)}")
         return
 
     function_code = frame[2]
@@ -439,11 +428,11 @@ def decode_frame(frame: bytes):
     elif function_code == 0x06:
         decode_serial(frame)
     else:
-        print(f"Nieznany typ ramki: 0x{function_code:02X}")
+        print(f"Unknown frame type: 0x{function_code:02X}")
 
 
 # -----------------------------
-# Główna pętla połączenia
+# Main connection loop
 # -----------------------------
 
 def main():
@@ -453,16 +442,16 @@ def main():
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(SOCKET_TIMEOUT)
-            print("Łączenie z falownikiem...")
+            print("Connecting with inverter (RS485-TCP adapter)...")
             sock.connect((INVERTER_IP, INVERTER_PORT))
-            print("Połączono z falownikiem")
+            print("Connected to inverter")
 
             buffer = b""
             while True:
                 try:
                     chunk = sock.recv(2048)
                     if not chunk:
-                        raise ConnectionError("Rozłączono")
+                        raise ConnectionError("Disconnected")
                     buffer += chunk
 
                     frames, buffer = extract_frames_from_buffer(buffer)
@@ -470,13 +459,13 @@ def main():
                         decode_frame(frame)
 
                 except (socket.timeout, ConnectionError):
-                    print("Utracono połączenie z falownikiem")
+                    print("Lost connection to inverter")
                     break
 
         except Exception as e:
-            print("Błąd połączenia:", e)
+            print("Connection error:", e)
 
-        print(f"Ponowna próba za {RECONNECT_DELAY}s...")
+        print(f"Next retry in {RECONNECT_DELAY}s...")
         time.sleep(RECONNECT_DELAY)
 
 
