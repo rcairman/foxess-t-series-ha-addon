@@ -1,0 +1,8 @@
+{
+  "inverter_ip": "192.168.1.31",
+  "inverter_port": 502,
+  "mqtt_host": "192.168.1.100",
+  "mqtt_port": 1883,
+  "mqtt_username": "foxess",
+  "mqtt_password": "foxess_ha_integration"
+}
