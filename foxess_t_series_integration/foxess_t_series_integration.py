@@ -430,28 +430,6 @@ def decode_frame(frame: bytes):
     else:
         print(f"Unknown frame type: 0x{function_code:02X}")
 
-# -----------------------------
-# Polling
-# -----------------------------
-
-POLL_FRAME = bytes([
-    0x7E, 0x7E,
-    0x00,       # address (0x00 if only one inverter is used)
-    0x02,       # function code = DATA
-    0x00, 0x00, # control + seq
-    0x00, 0x00, # payload length = 0
-    0xE7, 0xE7
-])
-
-def poller(sock):
-    """Periodically send 0x02 request to inverter"""
-    while True:
-        try:
-            sock.sendall(POLL_FRAME)
-        except Exception as e:
-            print("Polling failed:", e)
-            break
-        time.sleep(2)  # time in seconds between requests (2s = fast refresh)
 
 # -----------------------------
 # Main connection loop
@@ -467,8 +445,6 @@ def main():
             print("Connecting with inverter (RS485-TCP adapter)...")
             sock.connect((INVERTER_IP, INVERTER_PORT))
             print("Connected to inverter")
-            # start poller thread
-            threading.Thread(target=poller, args=(sock,), daemon=True).start()
 
             buffer = b""
             while True:
